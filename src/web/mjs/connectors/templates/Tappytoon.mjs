@@ -10,10 +10,10 @@ export default class Tappytoon extends Connector {
         this.url = undefined;
         this.baseURL = 'https://www.tappytoon.com';
         this.apiurl = 'https://api-global.tappytoon.com';
+
         this.lang = undefined;
         this.requestOptions.headers.set('x-referer', this.baseURL);
         this.requestOptions.headers.set('x-origin', this.baseURL);
-        this.requestOptions.headers.set('Accept-Language', this.lang);
     }
 
     get icon() {
@@ -54,19 +54,29 @@ export default class Tappytoon extends Connector {
         let uri = new URL(`/comics/${manga.id}/chapters`, this.apiurl);
         let request = new Request(uri, this.requestOptions);
         let data = await this.fetchJSON(request);
-        return data.filter(element => element.isFree).map(element => {
-            return {
-                id: element.id,
-                title: element.title,
-                language: ''
-            };
-        }).reverse();
+        return data
+            .filter(element => {
+                return element.isAccessible && (element.isFree || element.isUserUnlocked || element.isUserRented);
+            })
+            .map(element => {
+                return {
+                    id: element.id,
+                    title: element.title,
+                    language: ''
+                };
+            }).reverse();
     }
 
     async _getPages(chapter) {
-        let uri = new URL(`/chapters/${chapter.id}?includes=images`, this.apiurl);
+        //check if super quality is supported
+        let uri = new URL(`/comics/${chapter.manga.id}`, this.apiurl);
         let request = new Request(uri, this.requestOptions);
         let data = await this.fetchJSON(request);
-        return data.images.map(image => image.url);
+        const quality = data.isSuperHighQualitySupported ? 'super_high': 'high';
+        uri = new URL(`/content-delivery/contents?chapterId=${chapter.id}&variant=${quality}&locale=${this.lang}`, this.apiurl);
+        request = new Request(uri, this.requestOptions);
+        data = await this.fetchJSON(request);
+        return data.media.map(image => this.createConnectorURI(image.url));
     }
+
 }

@@ -2,6 +2,7 @@ import Connector from "../engine/Connector.mjs";
 import Manga from "../engine/Manga.mjs";
 
 export default class Baozimh extends Connector {
+
     constructor() {
         super();
         super.id = "baozimh";
@@ -26,7 +27,10 @@ export default class Baozimh extends Connector {
     async _getChapters(manga) {
         let request = new Request(new URL(manga.id, this.url), this.requestOptions);
         //where can it find the chapters
-        const data = await this.fetchDOM(request, ".l-box #chapter-items > div > a, .l-box #chapters_other_list > div > a");
+        let data = await this.fetchDOM(request, ".l-box #chapter-items > div > a, .l-box #chapters_other_list > div > a");
+        if (data.length == 0) {
+            data = await this.fetchDOM(request, ".l-box .comics-chapters > a.comics-chapters__item");
+        }
         let chapters = data.reverse(); //get first chapters on top
         return chapters.map((element) => {
             return {
@@ -35,12 +39,43 @@ export default class Baozimh extends Connector {
             };
         });
     }
+
     async _getPages(chapter) {
-        let request = new Request(
-            new URL(chapter.id, this.url),
-            this.requestOptions
-        );
-        let data = await this.fetchDOM(request, ".comic-contain amp-img.comic-contain__item");
-        return data.map(element => element.getAttribute('src'));
+        let pagesList = [];
+        let uri = new URL(chapter.id, this.url);
+        const sectionSlot = uri.searchParams.get('section_slot');
+        const chapterSlot = uri.searchParams.get('chapter_slot');
+        const linkRegex = new RegExp(`/${sectionSlot}_${chapterSlot}.*\\.html?$`, 'i');
+        let run = true;
+        while(run) {
+            const request = new Request(uri, this.requestOptions);
+            let data = await this.fetchDOM(request, '.comic-contain amp-img.comic-contain__item, div:not(.chapter-main) > div.next_chapter a');
+            if (data[data.length - 1].tagName.toLowerCase() === 'a') {
+                uri = this.getRootRelativeOrAbsoluteLink(data.pop(), this.url);
+                if (!uri || uri.match(linkRegex) == null) {
+                    uri = null;
+                }
+            } else {
+                uri = null;
+            }
+            pagesList.push( ...data.map(element => element.getAttribute('src')).filter(page => page) );
+            run = uri != null;
+        }
+        pagesList = pagesList.filter((page, index) => {
+            return index === pagesList.findIndex(item => item === page);
+        });
+
+        return pagesList.map(page => this.createConnectorURI(page));
+
+    }
+
+    async _handleConnectorURI(payload) {
+        const request = new Request(payload, this.requestOptions);
+        request.headers.set('x-referer', this.url);
+        const response = await fetch(request);
+        let data = await response.blob();
+        data = await this._blobToBuffer(data);
+        this._applyRealMime(data);
+        return data;
     }
 }
